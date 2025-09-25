@@ -61,35 +61,46 @@ app.post("/tools/find_or_create_contact", async (req, res) => {
         .json({ error: "Missing ghl_token or location_id for this client." });
     }
 
-    const GHL_BASE = "https://rest.gohighlevel.com/v1";
+    const GHL_BASE = "https://services.leadconnectorhq.com";
+
+    // Standard headers for all GHL requests
+    const baseHeaders = {
+      Authorization: `Bearer ${ghl_token}`,
+      Version: "2021-07-28",
+      LocationId: location_id,
+    };
 
     // 2) Search GHL by phone (preferred) or email
-    let searchUrl = new URL(`${GHL_BASE}/contacts/`);
-    if (phone) searchUrl.searchParams.set("phone", phone);
-    else if (email) searchUrl.searchParams.set("email", email);
+    let searchUrl;
+    if (phone) {
+      searchUrl = `${GHL_BASE}/contacts/lookup?phone=${encodeURIComponent(
+        phone
+      )}`;
+    } else {
+      searchUrl = `${GHL_BASE}/contacts/lookup?email=${encodeURIComponent(
+        email
+      )}`;
+    }
 
-    const foundResp = await fetch(searchUrl, {
-      headers: { Authorization: `Bearer ${ghl_token}` },
-    });
-
+    const foundResp = await fetch(searchUrl, { headers: baseHeaders });
     if (!foundResp.ok) {
       const txt = await foundResp.text();
       return res.status(400).json({ error: `GHL search failed: ${txt}` });
     }
 
     const found = await foundResp.json();
-    if (Array.isArray(found?.contacts) && found.contacts.length > 0) {
-      const contact = found.contacts[0];
-      return res.json({ contactId: contact.id, existed: true, contact });
+    if (found?.contact) {
+      return res.json({
+        contactId: found.contact.id,
+        existed: true,
+        contact: found.contact,
+      });
     }
 
     // 3) Not found → create a new contact
     const createResp = await fetch(`${GHL_BASE}/contacts/`, {
       method: "POST",
-      headers: {
-        Authorization: `Bearer ${ghl_token}`,
-        "Content-Type": "application/json",
-      },
+      headers: { ...baseHeaders, "Content-Type": "application/json" },
       body: JSON.stringify({
         locationId: location_id,
         phone: phone || "",
