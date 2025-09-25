@@ -34,70 +34,51 @@ app.get("/test-client/:id", async (req, res) => {
 });
 
 // ----- Tool: find_or_create_contact -----
-// expects JSON body: { client_id, phone?, email?, name? }
+// expects JSON: { client_id, phone?, email?, name? }
 app.post("/tools/find_or_create_contact", async (req, res) => {
   try {
     const { client_id, phone, email, name } = req.body;
-
-    // Basic validation
     if (!client_id || (!phone && !email)) {
-      return res
-        .status(400)
-        .json({ error: "client_id and phone or email are required" });
+      return res.status(400).json({ error: "client_id and phone or email are required" });
     }
 
-    // 1) Get this client's GHL credentials from Supabase
+    // 1) Pull creds from Supabase
     const { data: client, error: dbErr } = await supabase
       .from("clients")
       .select("ghl_token, location_id")
       .eq("id", client_id)
       .single();
-
     if (dbErr) return res.status(400).json({ error: dbErr.message });
+
     const { ghl_token, location_id } = client || {};
     if (!ghl_token || !location_id) {
-      return res
-        .status(400)
-        .json({ error: "Missing ghl_token or location_id for this client." });
+      return res.status(400).json({ error: "Missing ghl_token or location_id for this client." });
     }
 
     const GHL_BASE = "https://services.leadconnectorhq.com";
-
-    // Standard headers for all GHL requests
     const baseHeaders = {
       Authorization: `Bearer ${ghl_token}`,
       Version: "2021-07-28",
-      LocationId: location_id,
+      LocationId: location_id
     };
 
-    // 2) Search GHL by phone (preferred) or email
-    let searchUrl;
-    if (phone) {
-      searchUrl = `${GHL_BASE}/contacts/lookup?phone=${encodeURIComponent(
-        phone
-      )}`;
-    } else {
-      searchUrl = `${GHL_BASE}/contacts/lookup?email=${encodeURIComponent(
-        email
-      )}`;
+    // 2) Try a simple lookup first (GET /contacts)
+    if (phone || email) {
+      const q = phone ? `phone=${encodeURIComponent(phone)}` : `email=${encodeURIComponent(email)}`;
+      const lookupResp = await fetch(`${GHL_BASE}/contacts/?${q}`, { headers: baseHeaders });
+      // If lookup allowed + found
+      if (lookupResp.ok) {
+        const data = await lookupResp.json();
+        if (Array.isArray(data.contacts) && data.contacts.length > 0) {
+          const contact = data.contacts[0];
+          return res.json({ contactId: contact.id, existed: true, contact });
+        }
+        // if ok but not found -> fall through to create
+      }
+      // If 403 or other issue, we’ll just create below
     }
 
-    const foundResp = await fetch(searchUrl, { headers: baseHeaders });
-    if (!foundResp.ok) {
-      const txt = await foundResp.text();
-      return res.status(400).json({ error: `GHL search failed: ${txt}` });
-    }
-
-    const found = await foundResp.json();
-    if (found?.contact) {
-      return res.json({
-        contactId: found.contact.id,
-        existed: true,
-        contact: found.contact,
-      });
-    }
-
-    // 3) Not found → create a new contact
+    // 3) Create (works with your key)
     const createResp = await fetch(`${GHL_BASE}/contacts/`, {
       method: "POST",
       headers: { ...baseHeaders, "Content-Type": "application/json" },
@@ -105,8 +86,8 @@ app.post("/tools/find_or_create_contact", async (req, res) => {
         locationId: location_id,
         phone: phone || "",
         email: email || "",
-        name: name || "",
-      }),
+        name: name || ""
+      })
     });
 
     if (!createResp.ok) {
@@ -118,8 +99,9 @@ app.post("/tools/find_or_create_contact", async (req, res) => {
     return res.json({
       contactId: created?.contact?.id,
       existed: false,
-      contact: created?.contact,
+      contact: created?.contact
     });
+
   } catch (e) {
     console.error(e);
     return res.status(500).json({ error: "server_error", details: String(e) });
