@@ -50,9 +50,13 @@ app.post("/tools/find_or_create_contact", async (req, res) => {
     if (phone) searchUrl.searchParams.set("phone", phone);
     else if (email) searchUrl.searchParams.set("email", email);
 
-    const foundResp = await fetch(searchUrl, {
-      headers: { Authorization: `Bearer ${ghl_token}` },
-    });
+    const baseHeaders = {
+      Authorization: `Bearer ${ghl_token}`,
+      Version: "2021-07-28",
+      LocationId: location_id
+    };
+    
+    const foundResp = await fetch(searchUrl, { headers: baseHeaders });
 
     if (!foundResp.ok) {
       const txt = await foundResp.text();
@@ -68,10 +72,7 @@ app.post("/tools/find_or_create_contact", async (req, res) => {
     // 3) Create contact if not found
     const createResp = await fetch(`${GHL_BASE}/contacts/`, {
       method: "POST",
-      headers: {
-        Authorization: `Bearer ${ghl_token}`,
-        "Content-Type": "application/json",
-      },
+      headers: { ...baseHeaders, "Content-Type": "application/json" },
       body: JSON.stringify({
         locationId: location_id,
         phone: phone || "",
